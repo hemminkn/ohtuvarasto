@@ -28,11 +28,6 @@ class Varasto:
 
         self.saldo = self.saldo - maara
 
-        if maara > 0:
-            pass
-        else:
-            pass
-
         return maara
 
     def __str__(self):
