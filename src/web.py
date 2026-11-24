@@ -7,7 +7,7 @@ from wsgiref.simple_server import make_server
 from varasto import Varasto
 
 
-class WarehouseApp:
+class WarehouseApp:  # pylint: disable=too-few-public-methods
     def __init__(self):
         self.warehouses = []
 
@@ -18,39 +18,61 @@ class WarehouseApp:
         if method == "GET" and path == "/":
             return self._respond(start_response, "200 OK", self._page())
 
-        if method != "POST":
-            return self._respond(start_response, "404 Not Found", "Not found")
+        if method == "POST":
+            return self._handle_post_request(environ, path, start_response)
 
+        return self._respond(start_response, "404 Not Found", "Not found")
+
+    def _handle_post_request(self, environ, path, start_response):
         fields = self._read_fields(environ)
         try:
-            if path == "/warehouses":
-                name = fields.get("name", [""])[0].strip()
-                if not name:
-                    raise ValueError("Warehouse name is required.")
-                capacity = self._number(fields, "capacity")
-                self.warehouses.append({
-                    "name": name,
-                    "stock": Varasto(capacity),
-                })
-            else:
-                match = re.fullmatch(r"/warehouses/(\d+)/(add|remove)", path)
-                if not match:
-                    return self._respond(
-                        start_response, "404 Not Found", "Not found")
-                warehouse_id = int(match.group(1))
-                if warehouse_id >= len(self.warehouses):
-                    return self._respond(
-                        start_response, "404 Not Found", "Not found")
-                amount = self._number(fields, "amount")
-                stock = self.warehouses[warehouse_id]["stock"]
-                if match.group(2) == "add":
-                    stock.lisaa_varastoon(amount)
-                else:
-                    stock.ota_varastosta(amount)
+            return self._handle_post(path, fields, start_response)
         except ValueError as error:
-            return self._respond(
-                start_response, "400 Bad Request", self._page(str(error)))
+            return self._bad_request(start_response, error)
 
+    def _bad_request(self, start_response, error):
+        return self._respond(
+            start_response, "400 Bad Request", self._page(str(error)))
+
+    def _handle_post(self, path, fields, start_response):
+        if path == "/warehouses":
+            self._create_warehouse(fields)
+        elif not self._update_warehouse(path, fields):
+            return self._respond(
+                start_response, "404 Not Found", "Not found")
+        return self._redirect(start_response)
+
+    def _create_warehouse(self, fields):
+        name = fields.get("name", [""])[0].strip()
+        if not name:
+            raise ValueError("Warehouse name is required.")
+        capacity = self._number(fields, "capacity")
+        self.warehouses.append({
+            "name": name,
+            "stock": Varasto(capacity),
+        })
+
+    def _update_warehouse(self, path, fields):
+        match = re.fullmatch(r"/warehouses/(\d+)/(add|remove)", path)
+        if not match:
+            return False
+        warehouse_id = int(match.group(1))
+        if warehouse_id >= len(self.warehouses):
+            return False
+        amount = self._number(fields, "amount")
+        stock = self.warehouses[warehouse_id]["stock"]
+        self._change_stock(stock, match.group(2), amount)
+        return True
+
+    @staticmethod
+    def _change_stock(stock, operation, amount):
+        if operation == "add":
+            stock.lisaa_varastoon(amount)
+        else:
+            stock.ota_varastosta(amount)
+
+    @staticmethod
+    def _redirect(start_response):
         start_response("303 See Other", [
             ("Location", "/"),
             ("Content-Length", "0"),
